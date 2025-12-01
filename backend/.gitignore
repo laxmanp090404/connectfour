@@ -1,0 +1,11 @@
+/bin
+main
+main.exe
+*.exe
+*.test
+.env
+.env.local
+.vscode
+.idea
+.DS_Store
+Thumbs.db
