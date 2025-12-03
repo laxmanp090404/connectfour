@@ -75,18 +75,26 @@ func (h *Hub) AddPlayer(conn *websocket.Conn, username string) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	// 1. RECONNECTION LOGIC: Search active games for this username
+	// 1. RECONNECTION LOGIC
 	for _, game := range h.games {
 		if game.Status == "playing" {
-			// Is it Player 1?
+			// Player 1 Rejoin
 			if game.Player1.Username == username {
 				fmt.Printf("♻️ REJOIN: %s reconnected to game %s\n", username, game.ID)
+				if game.P1Timer != nil { 
+					game.P1Timer.Stop() // STOP THE FORFEIT TIMER
+					game.P1Timer = nil
+				}
 				h.reconnectPlayer(game, game.Player1, conn, 1)
 				return
 			}
-			// Is it Player 2?
+			// Player 2 Rejoin
 			if game.Player2.Username == username {
 				fmt.Printf("♻️ REJOIN: %s reconnected to game %s\n", username, game.ID)
+				if game.P2Timer != nil { 
+					game.P2Timer.Stop() // STOP THE FORFEIT TIMER
+					game.P2Timer = nil
+				}
 				h.reconnectPlayer(game, game.Player2, conn, 2)
 				return
 			}
@@ -94,7 +102,7 @@ func (h *Hub) AddPlayer(conn *websocket.Conn, username string) {
 	}
 
 	// 2. NEW PLAYER LOGIC
-	delete(h.playerGameMap, conn) // Cleanup potential old keys
+	delete(h.playerGameMap, conn)
 	wp := &WaitingPlayer{
 		Player:   &Player{Conn: conn, Username: username},
 		JoinedAt: time.Now(),
@@ -104,19 +112,16 @@ func (h *Hub) AddPlayer(conn *websocket.Conn, username string) {
 }
 
 func (h *Hub) reconnectPlayer(g *Game, p *Player, conn *websocket.Conn, symbol int) {
-	// Update connection info
 	p.Conn = conn
 	h.playerGameMap[conn] = g
 
-	// Send immediate "Start" signal so frontend switches to Game View
+	// Send State
 	startPayload := models.GameStartPayload{
 		GameID: g.ID, Opponent: g.Player2.Username, Symbol: symbol, IsTurn: (g.Turn == symbol),
 	}
 	if symbol == 2 { startPayload.Opponent = g.Player1.Username }
-	
 	conn.WriteJSON(models.WSMessage{Type: models.MsgGameStart, Payload: startPayload})
 
-	// Send Board State
 	updatePayload := models.GameUpdatePayload{
 		Board:      *g.Board,
 		Turn:       g.Turn,
@@ -153,28 +158,85 @@ func (h *Hub) HandleDisconnect(conn *websocket.Conn) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	
-	// Remove from lookup map
+	game, exists := h.playerGameMap[conn]
+	
+	// Remove from connection lookup immediately
 	delete(h.playerGameMap, conn)
 
-	// Only remove from waiting list. 
-	// DO NOT remove from 'h.games' yet, so they can rejoin!
+	// Remove from waiting queue if they were just waiting
 	for i, wp := range h.waiting {
 		if wp.Player.Conn == conn {
 			h.waiting = append(h.waiting[:i], h.waiting[i+1:]...)
-			break
+			return // Just a waiter, no game logic needed
+		}
+	}
+
+	// GAME DISCONNECT LOGIC
+	if exists && game != nil && game.Status == "playing" {
+		fmt.Printf("⚠️ Player disconnected from Game %s. Starting 30s timer.\n", game.ID)
+		
+		// Define the forfeit callback
+		forfeitFunc := func() {
+			// We must lock inside the callback because it runs in a separate goroutine
+			h.mutex.Lock()
+			defer h.mutex.Unlock()
+			
+			// Verify game still exists and is still playing
+			if currentG, ok := h.games[game.ID]; ok && currentG.Status == "playing" {
+				fmt.Printf("⏰ Timeout! Forfeiting game %s\n", game.ID)
+				
+				winner := game.Player2.Username
+				if game.Player2.Conn == conn { // If P2 disconnected, P1 wins
+					winner = game.Player1.Username
+				}
+				
+				// Manually trigger game over
+				currentG.Status = "finished"
+				
+				// Notify the winner (if they are still there)
+				// We call endGame on the game struct which sends WS messages
+				currentG.Status = "finished" // Ensure status is updated
+				
+				// Note: accessing endGame requires us to be careful about locks, 
+				// but handleGameOver deals with the cleanup.
+				// Simplest way: Call handleGameOver directly to clean DB/Map
+				h.handleGameOver(currentG, winner, "forfeit")
+
+				// Send WS message to the remaining player
+				msg := models.WSMessage{
+					Type: models.MsgGameOver,
+					Payload: models.GameOverPayload{
+						Winner: winner,
+						Reason: "forfeit",
+					},
+				}
+				if winner == game.Player1.Username {
+					game.Player1.Conn.WriteJSON(msg)
+				} else if !game.Player2.IsBot {
+					game.Player2.Conn.WriteJSON(msg)
+				}
+			}
+		}
+
+		// Start Timer based on who disconnected
+		if game.Player1.Conn == conn {
+			game.P1Timer = time.AfterFunc(30*time.Second, forfeitFunc)
+		} else if game.Player2.Conn == conn {
+			game.P2Timer = time.AfterFunc(30*time.Second, forfeitFunc)
 		}
 	}
 }
 
 func (h *Hub) handleGameOver(g *Game, winner, reason string) {
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
+	// Note: mutex is usually held by caller, but if called from Game struct, it might not be.
+	// However, in our flow, Hub controls the lifecycle.
 	
 	delete(h.games, g.ID)
-	if !g.Player1.IsBot { delete(h.playerGameMap, g.Player1.Conn) }
-	if !g.Player2.IsBot { delete(h.playerGameMap, g.Player2.Conn) }
+	// Clean up connection maps if they exist
+	if !g.Player1.IsBot && g.Player1.Conn != nil { delete(h.playerGameMap, g.Player1.Conn) }
+	if !g.Player2.IsBot && g.Player2.Conn != nil { delete(h.playerGameMap, g.Player2.Conn) }
 	
-	fmt.Printf("Game Over: %s won. Saving to DB/Kafka.\n", winner)
+	fmt.Printf("Game Over: %s won (%s). Saving to DB/Kafka.\n", winner, reason)
 
 	if h.repo != nil {
 		h.repo.SaveGame(g.ID, g.Player1.Username, g.Player2.Username, winner, reason)

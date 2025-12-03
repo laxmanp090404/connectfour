@@ -24,6 +24,10 @@ type Game struct {
 	Status    string // "playing", "finished"
 	CreatedAt time.Time
 	
+	// Reconnection Timers
+	P1Timer *time.Timer
+	P2Timer *time.Timer
+
 	broadcast chan models.WSMessage
 	mutex     sync.Mutex
 	
@@ -37,7 +41,7 @@ func NewGame(id string, p1, p2 *Player, onGameOver func(*Game, string, string)) 
 		Board:      NewBoard(),
 		Player1:    p1,
 		Player2:    p2,
-		Turn:       1, // Player 1 starts
+		Turn:       1,
 		Status:     "playing",
 		CreatedAt:  time.Now(),
 		broadcast:  make(chan models.WSMessage),
@@ -48,9 +52,7 @@ func NewGame(id string, p1, p2 *Player, onGameOver func(*Game, string, string)) 
 	return g
 }
 
-// Start begins the game loop
 func (g *Game) Start() {
-	// Notify players game started
 	g.sendTo(g.Player1, models.MsgGameStart, models.GameStartPayload{
 		GameID: g.ID, Opponent: g.Player2.Username, Symbol: 1, IsTurn: true,
 	})
@@ -59,12 +61,9 @@ func (g *Game) Start() {
 		g.sendTo(g.Player2, models.MsgGameStart, models.GameStartPayload{
 			GameID: g.ID, Opponent: g.Player1.Username, Symbol: 2, IsTurn: false,
 		})
-	} else {
-		// If P2 is bot, we don't send WS message, but we might need to trigger move if it was P2 turn (not the case here)
 	}
 }
 
-// MakeMove handles a player dropping a disc
 func (g *Game) MakeMove(playerSymbol, col int) {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
@@ -99,13 +98,13 @@ func (g *Game) MakeMove(playerSymbol, col int) {
 	}
 
 	// Switch Turn
-	g.Turn = 3 - g.Turn // 1 becomes 2, 2 becomes 1
+	g.Turn = 3 - g.Turn 
 	g.broadcastUpdate()
 
-	// If next player is Bot, trigger bot move
+	// Bot Logic
 	if g.Turn == 2 && g.Player2.IsBot {
 		go func() {
-			time.Sleep(500 * time.Millisecond) // Simulate thinking
+			time.Sleep(500 * time.Millisecond)
 			bot := NewBot(2)
 			botMove := bot.GetMove(g.Board)
 			g.MakeMove(2, botMove)
@@ -129,6 +128,10 @@ func (g *Game) broadcastUpdate() {
 }
 
 func (g *Game) endGame(winner, reason string) {
+	// If timers are running, stop them
+	if g.P1Timer != nil { g.P1Timer.Stop() }
+	if g.P2Timer != nil { g.P2Timer.Stop() }
+
 	msg := models.WSMessage{
 		Type: models.MsgGameOver,
 		Payload: models.GameOverPayload{
@@ -148,18 +151,12 @@ func (g *Game) endGame(winner, reason string) {
 }
 
 func (g *Game) sendTo(p *Player, msgType models.MessageType, data interface{}) {
-	if p.IsBot {
-		return
-	}
+	if p.IsBot { return }
 	msg := models.WSMessage{Type: msgType, Payload: data}
 	g.safeWrite(p.Conn, msg)
 }
 
 func (g *Game) safeWrite(conn *websocket.Conn, msg interface{}) {
-	if conn == nil {
-		return
-	}
-	// In a real production app, we would use a writePump channel to avoid concurrent writes
-	// For this interview assignment, strict locking on the connection is acceptable or simple sync write
+	if conn == nil { return }
 	conn.WriteJSON(msg)
 }
