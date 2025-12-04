@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/IBM/sarama"
 )
@@ -12,6 +13,11 @@ import (
 type Consumer struct {
 	consumer sarama.Consumer
 	topic    string
+	
+	// Analytics State
+	totalGames    int
+	totalDuration float64
+	gamesByHour   map[string]int
 }
 
 func NewConsumer(brokers []string) (*Consumer, error) {
@@ -22,7 +28,11 @@ func NewConsumer(brokers []string) (*Consumer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Consumer{consumer: c, topic: "game-analytics"}, nil
+	return &Consumer{
+		consumer:    c,
+		topic:       "game-analytics",
+		gamesByHour: make(map[string]int),
+	}, nil
 }
 
 func (c *Consumer) Start() {
@@ -32,11 +42,10 @@ func (c *Consumer) Start() {
 		return
 	}
 
-	// Trap SIGINT to trigger a shutdown.
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
 
-	log.Println("ANALYTICS: Consumer started. Listening for game events...")
+	log.Println("ANALYTICS: Consumer started. Tracking metrics...")
 
 	go func() {
 		for {
@@ -44,7 +53,7 @@ func (c *Consumer) Start() {
 			case msg := <-partitionConsumer.Messages():
 				var event GameAnalyticsEvent
 				if err := json.Unmarshal(msg.Value, &event); err == nil {
-					log.Printf("📊 ANALYTICS PROCESSED: Winner=%s GameID=%s", event.Winner, event.GameID)
+					c.processEvent(event)
 				}
 			case err := <-partitionConsumer.Errors():
 				log.Printf("ANALYTICS ERROR: %v", err)
@@ -53,4 +62,28 @@ func (c *Consumer) Start() {
 			}
 		}
 	}()
+}
+
+func (c *Consumer) processEvent(e GameAnalyticsEvent) {
+	// 1. Update Metrics
+	c.totalGames++
+	c.totalDuration += e.Duration
+	
+	// Track Games per Hour (Key: "2025-12-03 15:00")
+	currentHour := time.Now().Format("2006-01-02 15:00")
+	c.gamesByHour[currentHour]++
+
+	// 2. Calculate Derived Stats
+	avgDuration := 0.0
+	if c.totalGames > 0 {
+		avgDuration = c.totalDuration / float64(c.totalGames)
+	}
+
+	// 3. Log the "Report"
+	log.Printf("📊 [ANALYTICS REPORT]")
+	log.Printf("   Last Game:   %s (Winner: %s, Time: %.2fs)", e.GameID, e.Winner, e.Duration)
+	log.Printf("   Total Games: %d", c.totalGames)
+	log.Printf("   Avg Duration: %.2f seconds", avgDuration)
+	log.Printf("   Games This Hour: %d", c.gamesByHour[currentHour])
+	log.Printf("------------------------------------------------")
 }

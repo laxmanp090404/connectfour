@@ -13,18 +13,16 @@ type Producer struct {
 }
 
 type GameAnalyticsEvent struct {
-	Event    string `json:"event"` // "GAME_OVER"
-	GameID   string `json:"gameId"`
-	Winner   string `json:"winner"`
-	Duration int64  `json:"duration_seconds"` // Placeholder for simplicity
+	Event    string  `json:"event"`
+	GameID   string  `json:"gameId"`
+	Winner   string  `json:"winner"`
+	Duration float64 `json:"duration_seconds"` // Added duration
 }
 
 func NewProducer(brokers []string) (*Producer, error) {
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true
 	config.Producer.RequiredAcks = sarama.WaitForAll
-
-	// Retry logic
 	config.Producer.Retry.Max = 5
 
 	p, err := sarama.NewSyncProducer(brokers, config)
@@ -35,11 +33,12 @@ func NewProducer(brokers []string) (*Producer, error) {
 	return &Producer{producer: p, topic: "game-analytics"}, nil
 }
 
-func (p *Producer) EmitGameOver(gameID, winner string) {
+func (p *Producer) EmitGameOver(gameID, winner string, duration float64) {
 	event := GameAnalyticsEvent{
-		Event:  "GAME_OVER",
-		GameID: gameID,
-		Winner: winner,
+		Event:    "GAME_OVER",
+		GameID:   gameID,
+		Winner:   winner,
+		Duration: duration,
 	}
 
 	val, _ := json.Marshal(event)
@@ -54,7 +53,7 @@ func (p *Producer) EmitGameOver(gameID, winner string) {
 	if err != nil {
 		log.Printf("KAFKA ERROR: Failed to send message: %v", err)
 	} else {
-		log.Printf("KAFKA: Event sent for game %s", gameID)
+		log.Printf("KAFKA: Event sent for game %s (%.2fs)", gameID, duration)
 	}
 }
 

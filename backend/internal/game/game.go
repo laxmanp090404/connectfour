@@ -23,7 +23,8 @@ type Game struct {
 	Turn      int // 1 or 2
 	Status    string // "playing", "finished"
 	CreatedAt time.Time
-	
+	StartTime time.Time // <--- New Field to track actual start
+
 	// Reconnection Timers
 	P1Timer *time.Timer
 	P2Timer *time.Timer
@@ -31,11 +32,11 @@ type Game struct {
 	broadcast chan models.WSMessage
 	mutex     sync.Mutex
 	
-	// callback to save game result
-	OnGameOver func(game *Game, winner string, reason string)
+	// Callback updated to include duration
+	OnGameOver func(game *Game, winner string, reason string, duration float64)
 }
 
-func NewGame(id string, p1, p2 *Player, onGameOver func(*Game, string, string)) *Game {
+func NewGame(id string, p1, p2 *Player, onGameOver func(*Game, string, string, float64)) *Game {
 	g := &Game{
 		ID:         id,
 		Board:      NewBoard(),
@@ -44,6 +45,7 @@ func NewGame(id string, p1, p2 *Player, onGameOver func(*Game, string, string)) 
 		Turn:       1,
 		Status:     "playing",
 		CreatedAt:  time.Now(),
+		StartTime:  time.Now(), // Initialize
 		broadcast:  make(chan models.WSMessage),
 		OnGameOver: onGameOver,
 	}
@@ -53,6 +55,8 @@ func NewGame(id string, p1, p2 *Player, onGameOver func(*Game, string, string)) 
 }
 
 func (g *Game) Start() {
+	g.StartTime = time.Now() // Reset start time when game actually begins
+	
 	g.sendTo(g.Player1, models.MsgGameStart, models.GameStartPayload{
 		GameID: g.ID, Opponent: g.Player2.Username, Symbol: 1, IsTurn: true,
 	})
@@ -132,6 +136,9 @@ func (g *Game) endGame(winner, reason string) {
 	if g.P1Timer != nil { g.P1Timer.Stop() }
 	if g.P2Timer != nil { g.P2Timer.Stop() }
 
+	// Calculate Duration
+	duration := time.Since(g.StartTime).Seconds()
+
 	msg := models.WSMessage{
 		Type: models.MsgGameOver,
 		Payload: models.GameOverPayload{
@@ -146,7 +153,7 @@ func (g *Game) endGame(winner, reason string) {
 	}
 	
 	if g.OnGameOver != nil {
-		g.OnGameOver(g, winner, reason)
+		g.OnGameOver(g, winner, reason, duration)
 	}
 }
 
