@@ -1,8 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+
+// --- CONFIGURATION ---
+const getEnv = (key, fallback) => {
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  return fallback;
+};
+
+const API_URL = (getEnv('VITE_API_URL', 'http://localhost:8080')).replace(/\/$/, '');
+const WS_URL = (getEnv('VITE_WS_URL', 'ws://localhost:8080')).replace(/\/$/, '');
 
 // --- STYLES ---
 const styles = {
-  container: { fontFamily: 'Arial, sans-serif', textAlign: 'center', backgroundColor: '#282c34', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white',margin:'Opx' },
+  container: { fontFamily: 'Arial, sans-serif', textAlign: 'center', backgroundColor: '#282c34', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white' },
   input: { padding: '10px', fontSize: '16px', borderRadius: '5px', border: 'none', marginRight: '10px' },
   button: { padding: '10px 20px', fontSize: '16px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: '#61dafb', color: '#282c34', fontWeight: 'bold', margin: '5px' },
   secondaryButton: { padding: '10px 20px', fontSize: '14px', borderRadius: '5px', border: '1px solid #61dafb', cursor: 'pointer', backgroundColor: 'transparent', color: '#61dafb', margin: '5px' },
@@ -18,18 +29,17 @@ const styles = {
 };
 
 export default function App() {
-  // Game State
   const [socket, setSocket] = useState(null);
-  const [view, setView] = useState('login'); // login, matching, game, gameover, leaderboard
+  const [view, setView] = useState('login'); 
   const [username, setUsername] = useState('');
   const [gameInfo, setGameInfo] = useState({ opponent: '', symbol: 0, isTurn: false });
   const [board, setBoard] = useState(Array(6).fill(null).map(() => Array(7).fill(0)));
   const [winner, setWinner] = useState(null);
   const [leaderboardData, setLeaderboardData] = useState([]);
   
-  // Initialize WebSocket
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8080/ws');
+    console.log("Connecting to WebSocket:", `${WS_URL}/ws`);
+    const ws = new WebSocket(`${WS_URL}/ws`);
     
     ws.onopen = () => console.log("Connected to WS");
     ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
@@ -75,9 +85,14 @@ export default function App() {
 
   const fetchLeaderboard = async () => {
     try {
-      const response = await fetch('http://localhost:8080/leaderboard');
+      console.log("Fetching Leaderboard from:", `${API_URL}/leaderboard`);
+      const response = await fetch(`${API_URL}/leaderboard`);
       const data = await response.json();
-      setLeaderboardData(data || []);
+      
+      // FILTER OUT THE BOT HERE
+      const humanOnlyData = (data || []).filter(entry => entry.username !== 'Bot');
+      
+      setLeaderboardData(humanOnlyData);
       setView('leaderboard');
     } catch (error) {
       console.error("Failed to fetch leaderboard", error);
