@@ -1,12 +1,13 @@
 package event
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"log"
+	"os"
 
 	"github.com/IBM/sarama"
 )
-
 type Producer struct {
 	producer sarama.SyncProducer
 	topic    string
@@ -24,6 +25,16 @@ func NewProducer(brokers []string) (*Producer, error) {
 	config.Producer.Return.Successes = true
 	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Retry.Max = 5
+
+	// CHECK FOR SASL AUTH (Required for Upstash)
+	if user := os.Getenv("KAFKA_USER"); user != "" {
+		config.Net.SASL.Enable = true
+		config.Net.SASL.User = user
+		config.Net.SASL.Password = os.Getenv("KAFKA_PASSWORD")
+		config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = &tls.Config{InsecureSkipVerify: true}
+	}
 
 	p, err := sarama.NewSyncProducer(brokers, config)
 	if err != nil {

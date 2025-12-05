@@ -1,6 +1,7 @@
 package event
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"log"
 	"os"
@@ -24,6 +25,16 @@ func NewConsumer(brokers []string) (*Consumer, error) {
 	config := sarama.NewConfig()
 	config.Consumer.Return.Errors = true
 
+	// CHECK FOR SASL AUTH
+	if user := os.Getenv("KAFKA_USER"); user != "" {
+		config.Net.SASL.Enable = true
+		config.Net.SASL.User = user
+		config.Net.SASL.Password = os.Getenv("KAFKA_PASSWORD")
+		config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = &tls.Config{InsecureSkipVerify: true}
+	}
+
 	c, err := sarama.NewConsumer(brokers, config)
 	if err != nil {
 		return nil, err
@@ -34,7 +45,6 @@ func NewConsumer(brokers []string) (*Consumer, error) {
 		gamesByHour: make(map[string]int),
 	}, nil
 }
-
 func (c *Consumer) Start() {
 	partitionConsumer, err := c.consumer.ConsumePartition(c.topic, 0, sarama.OffsetNewest)
 	if err != nil {
