@@ -51,6 +51,9 @@ export default function App() {
           symbol: msg.payload.symbol, 
           isTurn: msg.payload.isTurn 
         });
+        // Reset board and winner state when a new game starts
+        setBoard(Array(6).fill(null).map(() => Array(7).fill(0)));
+        setWinner(null);
         setView('game');
         break;
       case 'UPDATE':
@@ -82,7 +85,6 @@ export default function App() {
       const response = await fetch(`${API_URL}/leaderboard`);
       const data = await response.json();
       
-      // FILTER OUT THE BOT
       const humanOnlyData = (data || []).filter(entry => entry.username !== 'Bot');
       
       setLeaderboardData(humanOnlyData);
