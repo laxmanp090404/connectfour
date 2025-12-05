@@ -1,15 +1,8 @@
 import React, { useState, useEffect } from 'react';
 
 // --- CONFIGURATION ---
-const getEnv = (key, fallback) => {
-  if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    return process.env[key];
-  }
-  return fallback;
-};
-
-const API_URL = (getEnv('VITE_API_URL', 'http://localhost:8080')).replace(/\/$/, '');
-const WS_URL = (getEnv('VITE_WS_URL', 'ws://localhost:8080')).replace(/\/$/, '');
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/\/$/, '');
+const WS_URL = (import.meta.env.VITE_WS_URL || 'ws://localhost:8080').replace(/\/$/, '');
 
 // --- STYLES ---
 const styles = {
@@ -89,7 +82,7 @@ export default function App() {
       const response = await fetch(`${API_URL}/leaderboard`);
       const data = await response.json();
       
-      // FILTER OUT THE BOT HERE
+      // FILTER OUT THE BOT
       const humanOnlyData = (data || []).filter(entry => entry.username !== 'Bot');
       
       setLeaderboardData(humanOnlyData);
