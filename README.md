@@ -9,7 +9,7 @@ It features real-time WebSocket communication, a competitive Minimax Bot, Postgr
 | Component | URL | Status |
 |-----------|-----|--------|
 | **Play the Game** | [https://connectfour-zeta.vercel.app](https://connectfour-zeta.vercel.app) | 🟢 Live |
-| **Backend API** | [https://connect4-backend.onrender.com/health](https://connect4-backend.onrender.com/health) | 🟢 Live |
+| **Backend API** | [https://connect4-backend-ov70.onrender.com/health](https://connect4-backend-ov70.onrender.com/health) | 🟢 Live |
 | **Leaderboard** | [https://connectfour-zeta.vercel.app](https://connectfour-zeta.vercel.app) (Click "View Leaderboard") | 🟢 Live |
 
 > **⚠️ Deployment Architecture:** The live backend runs on a Free Tier (Render). We utilize a **Graceful Degradation** strategy for the Analytics service:
